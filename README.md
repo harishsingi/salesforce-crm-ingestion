@@ -8,6 +8,8 @@ A wholesale CRM lives in Salesforce. Business teams need it fresh every day, wit
 
 ## Architecture — the actual design
 
+![CRM ingestion architecture](docs/crm-ingestion.svg)
+
 ```mermaid
 flowchart LR
     SF[Salesforce API] --> DL[Glue downloaders<br/>JSON raw, per object]
