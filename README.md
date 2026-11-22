@@ -23,6 +23,11 @@ flowchart LR
 
 ### Before / after
 
+Hover any component to see what it is and why it is needed.
+
+![Before / After architecture](docs/before-after-elaborated.svg)
+
+
 **Before:** the calendar decided. A day-1 delta was used, SRC was appended with a full load every day, and a multi-day failure silently missed changes, forcing full reloads.
 
 **After:** the data decides. For each table, read the latest timestamp already in the target (Athena MAX timestamp) with a small overlap, then load from that start date. Idempotent upserts make overlaps and replays safe, so the pipeline self-heals after outages.
