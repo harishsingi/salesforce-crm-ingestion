@@ -1,0 +1,5 @@
+[project]
+name = "salesforce-crm-ingestion"
+version = "0.1.0"
+description = "Salesforce CRM ingestion: SRC/PRE/SEM with dedupe, deletes, and self-healing incremental loads"
+requires-python = ">=3.10"
