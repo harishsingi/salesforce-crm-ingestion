@@ -32,6 +32,17 @@ Hover any component to see what it is and why it is needed.
 
 **After:** the data decides. For each table, read the latest timestamp already in the target (Athena MAX timestamp) with a small overlap, then load from that start date. Idempotent upserts make overlaps and replays safe, so the pipeline self-heals after outages.
 
+<details>
+<summary><b>Data fetching from API — click to expand the 3 steps</b></summary>
+
+Steps 1-3 of the delta flow are all part of data fetching from API. Collapsed, this is just: Salesforce API -&gt; Glue custom downloader.
+
+1. For each table, run Athena MAX(timestamp) on the target to get the watermark, the latest timestamp already loaded.
+2. Build the Salesforce API query per table from that watermark, with a small overlap, so a change right on the boundary is not missed.
+3. Call the Salesforce API with that query, fetching only changes since the watermark, not a full load.
+
+</details>
+
 The delta, step by step:
 
 1. For each table, run Athena MAX(timestamp) on the target to get the watermark, the latest timestamp already loaded.
