@@ -32,6 +32,20 @@ Hover any component to see what it is and why it is needed.
 
 **After:** the data decides. For each table, read the latest timestamp already in the target (Athena MAX timestamp) with a small overlap, then load from that start date. Idempotent upserts make overlaps and replays safe, so the pipeline self-heals after outages.
 
+The delta, step by step:
+
+1. For each table, run Athena MAX(timestamp) on the target to get the watermark, the latest timestamp already loaded.
+2. Build the Salesforce API query per table from that watermark, with a small overlap, so a change right on the boundary is not missed.
+3. Call the Salesforce API with that query, fetching only changes since the watermark, not a full load.
+4. Custom Glue downloaders call the API per object and land responses as JSON in the raw layer, exactly as the API returned them.
+5. Schema check, then the SRC job writes Parquet, overwriting that day's load, so a re-run is safe and clean.
+6. The PRE job upserts, deduping on record Id and keeping the latest timestamp, loading each Id once as a create or an update, with full history kept. Idempotent upserts make overlaps and replays safe.
+7. The SEM job promotes PRE to SEM, Iceberg to Iceberg, fast, applying deletes via is_deleted, so SEM is current while PRE keeps history.
+8. DQ check daily at noon on the timestamp field, alerting if no new data arrived.
+9. Self-healing: if down 1 day or 10, the next run resumes from the watermark, no gaps, no full reloads.
+
+Why this beats a typical calendar delta: the data decides the start date, not the calendar, so a missed day does not silently lose changes. A typical delta asks "what changed yesterday?", this one asks "what is the latest timestamp already in the target, and what changed since then?"
+
 ### Layers
 
 - **Raw:** Glue downloaders call the Salesforce API and land responses as JSON, per object (Account, Opportunity, Contact).
