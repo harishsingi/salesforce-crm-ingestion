@@ -65,16 +65,100 @@ Why this beats a typical calendar delta: the data decides the start date, not th
 - **SEM:** filters applied, deletes carried via an `is_deleted` field and applied at PRE to SEM promotion, so history is preserved in PRE and SEM reflects the current state. PRE to SEM is fast because it is Iceberg to Iceberg.
 - **DQ:** a daily noon check reads the latest timestamp in the target and alerts if no new data arrived.
 
-## Run
+## Setup
+
+Requires Python 3.10+ and no other runtime dependencies besides PyYAML.
 
 ```bash
-python -m src.generate_data
-python -m src.download --object Account --out data/raw
-python -m src.src_to_pre --src data/raw --pre data/pre
-python -m src.pre_to_sem --pre data/pre --sem data/sem
-python -m src.dq_check --target data/sem
-python -m pytest tests/ -q
+pip install -r requirements.txt   # pyyaml
 ```
+
+Run the modules with `PYTHONPATH=src` from the repo root (shown below).
+`pip install -e .` in a virtualenv additionally installs the `crm-*`
+commands declared in `pyproject.toml`; on this machine's system Python,
+user site-packages are disabled, so the `PYTHONPATH=src` form is the
+reliable one.
+
+Configuration lives in `config.yaml` (objects, layer paths, watermark overlap, DQ freshness window, retry settings). No credentials in the file: the real API is used only when `SF_INSTANCE_URL` and `SF_ACCESS_TOKEN` are both set in the environment. With neither set, the pipeline runs in offline mode against generated synthetic data, so the whole flow works locally with no account and no network.
+
+## Run
+
+Full pipeline locally (generates synthetic Accounts, downloads, promotes, DQ-checks):
+
+```bash
+PYTHONPATH=src python -m crm_ingestion.pipeline
+```
+
+Individual stages (each logs row counts: `rows_in`, `rows_out`, `rejected`, `created`, `updated`):
+
+```bash
+PYTHONPATH=src python -m crm_ingestion.generate_data --out data/synthetic
+PYTHONPATH=src python -m crm_ingestion.download --object Account
+PYTHONPATH=src python -m crm_ingestion.src_to_pre --object Account
+PYTHONPATH=src python -m crm_ingestion.pre_to_sem --object Account
+PYTHONPATH=src python -m crm_ingestion.dq_check --object Account
+```
+
+The DQ check is designed to be scheduled daily at noon, e.g.:
+
+```cron
+0 12 * * * cd /path/to/salesforce-crm-ingestion && PYTHONPATH=src python -m crm_ingestion.dq_check --object Account
+```
+
+It exits 0 when SEM is fresh and 2 with a `DQ ALERT` log line when SEM is empty or its latest timestamp is older than `dq_max_age_hours` (36h by default).
+
+## How to test
+
+```bash
+pip install -e ".[dev]"   # pytest
+PYTHONPATH=src python -m pytest tests/ -q
+```
+
+65 tests cover every module: record validation, watermark/SOQL building, API retries and backoff (including 429/5xx retry, auth failing fast, paging), schema validation and quarantine, dedupe/upsert counts, delete promotion, DQ freshness, the downloader's watermark use, and a full end-to-end pipeline run including a replay that must change nothing.
+
+## Project structure
+
+```
+config.yaml                  # settings (no secrets); env vars for credentials
+src/crm_ingestion/
+  __init__.py
+  config.py                  # Settings: YAML + env overrides, validated
+  errors.py                  # exception hierarchy (schema, API, DQ, config)
+  logging_config.py          # shared logging setup (logging, not print)
+  models.py                  # CrmRecord: typed, validated, normalised
+  watermark.py               # MAX(timestamp) + incremental SOQL builder
+  api_client.py              # Salesforce client (retries/backoff/paging)
+                             #   + SyntheticApiClient (offline stand-in)
+  validate.py                # schema check + quarantine of bad records
+  store.py                   # JSON layer I/O (one file per object)
+  download.py                # watermark -> query -> fetch -> land raw
+  src_to_pre.py              # dedupe on Id, upsert into PRE (full history)
+  pre_to_sem.py              # apply deletes via is_deleted
+  dq_check.py                # noon freshness check on the SEM target
+  generate_data.py           # synthetic data generator (seeded, date-relative)
+  pipeline.py                # end-to-end local runner
+tests/                       # one test file per module
+docs/                        # architecture diagrams
+```
+
+## Production habits in this code
+
+- **Config separated from logic:** everything tunable lives in `config.yaml`; credentials come only from the environment, never from code or config.
+- **Typed signatures and docstrings** on every public function.
+- **Logging, not print:** every stage logs structured row counts (`rows_fetched`, `rows_valid`, `rows_rejected`, `created`, `updated`, `pre_after`, `deletes_applied`).
+- **Explicit error handling:** a custom exception hierarchy (`SchemaValidationError`, `ApiError` / `ApiAuthError`, `WatermarkError`, `DqAlertError`, `ConfigError`) instead of bare exceptions.
+- **Retries with backoff:** the API client retries 429/5xx and network errors with exponential backoff plus jitter, follows Salesforce query paging, and fails fast on auth errors.
+- **Idempotency:** re-running a download or an upsert changes nothing (verified by the replay test); the watermark overlap makes boundary changes safe to re-load.
+- **Data quality:** schema validation at ingest, null/duplicate handling in dedupe, bad records quarantined to `data/quarantine/*.jsonl` with the reason attached, never silently dropped.
+- **No hardcoded paths or credentials:** paths come from config, tokens from the environment.
+
+## Honest limitations (deliberately simple)
+
+- **Local layers are JSON files, not Parquet/Iceberg.** The production design writes Parquet to S3 and Iceberg tables; locally the same record flow runs on JSON so it works with no Spark or Glue. Stage code depends only on record lists, not the format.
+- **The watermark reads a local file.** In production it is an Athena `MAX(LastModifiedDate)` query over the target table; locally `watermark_from_file` computes the same maximum from the PRE file. The SOQL built from it is identical.
+- **The synthetic generator covers Account only.** Opportunity and Contact are in `config.yaml` because the real pipeline handles them, but the offline demo generates Accounts; fetching another object offline fails with a clear error telling you to generate its data or configure the real API.
+- **No real Salesforce credentials are bundled**, and no network call is made in offline mode. To run against a real org, set `SF_INSTANCE_URL` and `SF_ACCESS_TOKEN`.
+- **All data is synthetic.** Names are `Account 1` … `Account 100`, amounts are random integers from a fixed seed, dates are relative to the run date. Nothing here is real customer data, and no numbers in this repo are presented as measured production metrics.
 
 ## Base platform architecture
 

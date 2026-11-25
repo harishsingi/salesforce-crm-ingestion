@@ -1,5 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "salesforce-crm-ingestion"
-version = "0.1.0"
-description = "Salesforce CRM ingestion: SRC/PRE/SEM with dedupe, deletes, and self-healing incremental loads"
+version = "0.2.0"
+description = "Salesforce CRM ingestion: watermark-driven incremental loads, SRC/PRE/SEM with dedupe, deletes, and self-healing"
+readme = "README.md"
 requires-python = ">=3.10"
+dependencies = [
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[project.scripts]
+crm-generate-data = "crm_ingestion.generate_data:main"
+crm-download = "crm_ingestion.download:main"
+crm-src-to-pre = "crm_ingestion.src_to_pre:main"
+crm-pre-to-sem = "crm_ingestion.pre_to_sem:main"
+crm-dq-check = "crm_ingestion.dq_check:main"
+crm-pipeline = "crm_ingestion.pipeline:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

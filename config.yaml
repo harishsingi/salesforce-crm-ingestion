@@ -1,0 +1,29 @@
+# Salesforce CRM ingestion settings.
+# No credentials here: SF_INSTANCE_URL / SF_ACCESS_TOKEN come from the
+# environment. With neither set, the pipeline runs in offline mode against
+# synthetic data (see README).
+
+objects:
+  - Account
+  - Opportunity
+  - Contact
+
+raw_dir: data/raw
+pre_dir: data/pre
+sem_dir: data/sem
+quarantine_dir: data/quarantine
+synthetic_dir: data/synthetic
+
+# Overlap before the watermark (minutes) so a change landing exactly on
+# the boundary is not missed. Upserts downstream make re-loads safe.
+overlap_minutes: 15
+
+# DQ check: alert if the latest timestamp in SEM is older than this (hours).
+dq_max_age_hours: 36
+
+# API retries: attempts after the first, exponential backoff from this base.
+max_retries: 3
+backoff_base_seconds: 1.0
+request_timeout_seconds: 30.0
+
+log_level: INFO
